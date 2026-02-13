@@ -315,8 +315,7 @@ body { padding-bottom: 32px; }
 /* ═══ SECTION HIDDEN ═══ */
 .section-hidden { display: none !important; }
 
-/* ═══ PDF HIDDEN RENDER AREA ═══ */
-#pdf-render-area { position: absolute; left: -9999px; top: 0; }
+/* ═══ PDF via iframe — no render area needed ═══ */
 
 /* ═══ RESPONSIVE TWEAKS ═══ */
 @media (max-width: 600px) {
@@ -376,8 +375,7 @@ body { padding-bottom: 32px; }
   <span id="clock"></span>
 </footer>
 
-<!-- ═══ PDF RENDER ═══ -->
-<div id="pdf-render-area"></div>
+<!-- PDF se genera via iframe temporal -->
 
 <script>
 // ════════════════════════════════════════════════════════════════
@@ -883,7 +881,7 @@ function buildPDFHtml(d) {
 <style>
   @page { size: A4; margin: 18mm 15mm 20mm 15mm; }
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: 'Helvetica Neue', Arial, sans-serif; font-size: 9.5pt; color: #1a1a1a; line-height: 1.5; }
+  body { font-family: 'Helvetica Neue', Arial, sans-serif; font-size: 9.5pt; color: #1a1a1a; line-height: 1.5; background: #ffffff; padding: 0; margin: 0; }
   .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px; padding-bottom: 14px; border-bottom: 3px solid ${color}; }
   .header .logo img { max-height: 70px; }
   .header .doc-type { text-align: right; }
@@ -985,25 +983,35 @@ function generatePDF() {
 
 function _doPDFGeneration(d) {
   const html = buildPDFHtml(d);
-  const container = document.getElementById('pdf-render-area');
-  container.innerHTML = html;
   const nombre = `${(d.tipo_documento||'DOC').replace(/\s+/g,'_')}_${(d.cliente.nombre||'Sin_Cliente').replace(/[^a-zA-Z0-9]/g,'_').substring(0,25)}_${(d.detalles.numero||'SN').replace(/[^a-zA-Z0-9]/g,'_')}`;
-  const opt = {
-    margin: 0, filename: nombre + '.pdf',
-    image: { type: 'jpeg', quality: 0.98 },
-    html2canvas: { scale: 2, useCORS: true, letterRendering: true },
-    jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
-    pagebreak: { mode: ['avoid-all', 'css', 'legacy'] }
-  };
-  html2pdf().set(opt).from(container).save().then(() => {
-    setStatus('✓ PDF descargado correctamente');
-    toast('✓ PDF generado y descargado', 'success');
-    container.innerHTML = '';
-  }).catch(err => {
-    setStatus('✗ Error generando PDF');
-    toast('✗ Error: ' + err.message, 'error');
-    container.innerHTML = '';
-  });
+
+  // Crear iframe oculto — el HTML completo (con <style> en <head>) se renderiza bien aquí
+  const iframe = document.createElement('iframe');
+  iframe.style.cssText = 'position:fixed;left:0;top:0;width:210mm;height:297mm;border:none;opacity:0;pointer-events:none;z-index:-1;';
+  document.body.appendChild(iframe);
+
+  const doc = iframe.contentDocument || iframe.contentWindow.document;
+  doc.open(); doc.write(html); doc.close();
+
+  // Esperar a que el contenido se renderice completamente
+  setTimeout(() => {
+    const opt = {
+      margin: [10, 10, 10, 10], filename: nombre + '.pdf',
+      image: { type: 'jpeg', quality: 0.98 },
+      html2canvas: { scale: 2, useCORS: true, letterRendering: true, scrollY: 0, windowWidth: doc.body.scrollWidth },
+      jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+      pagebreak: { mode: ['avoid-all', 'css', 'legacy'] }
+    };
+    html2pdf().set(opt).from(doc.body).save().then(() => {
+      document.body.removeChild(iframe);
+      setStatus('✓ PDF descargado correctamente');
+      toast('✓ PDF generado y descargado', 'success');
+    }).catch(err => {
+      document.body.removeChild(iframe);
+      setStatus('✗ Error generando PDF');
+      toast('✗ Error: ' + err.message, 'error');
+    });
+  }, 600);
 }
 
 function previewPDF() {
@@ -1017,16 +1025,47 @@ function previewPDF() {
 function generateCombinedPDF() {
   if (state.tabs.length < 2) { toast('Necesitas al menos 2 pestañas para combinar', 'info'); return; }
   toast('⏳ Generando PDF combinado...', 'info');
-  const allHtml = state.tabs.map(t => buildPDFHtml(t.data)).join('<div style="page-break-after:always"></div>');
-  const container = document.getElementById('pdf-render-area');
-  container.innerHTML = allHtml;
-  html2pdf().set({
-    margin: 0, filename: `PACK_ERB_${new Date().toISOString().slice(0,10)}.pdf`,
-    image: { type: 'jpeg', quality: 0.98 },
-    html2canvas: { scale: 2 }, jsPDF: { unit: 'mm', format: 'a4' }
-  }).from(container).save().then(() => {
-    toast('✓ PDF combinado descargado', 'success'); container.innerHTML = '';
-  });
+
+  // Construir HTML combinado con page breaks
+  const pages = state.tabs.map(t => {
+    const d = t.data;
+    const totals = calcTotals(d);
+    const color = d.empresa.color_tema || '#1a4f8b';
+    const ivaRate = d.aplicar_iva ? (d.iva_porcentaje || 21) : 0;
+    const fecha = d.detalles.fecha ? new Date(d.detalles.fecha).toLocaleDateString('es-ES') : '';
+    const isTecnico = d.tipo_documento === 'INFORME TÉCNICO';
+    const conceptosHtml = (d.conceptos || []).filter(c => c.descripcion).map(c => {
+      const base = (c.cantidad||0) * (c.precio_base||0);
+      return `<tr><td>${esc(c.descripcion)}</td>${d.mostrar_cantidad ? `<td style="text-align:center">${parseFloat(c.cantidad).toFixed(2)}</td>` : ''}<td style="text-align:right">${parseFloat(c.precio_base).toFixed(2)} €</td><td style="text-align:right">${base.toFixed(2)} €</td>${d.aplicar_iva ? `<td style="text-align:right">${(base*ivaRate/100).toFixed(2)} €</td>` : ''}<td style="text-align:right;font-weight:600">${(d.aplicar_iva?base*(1+ivaRate/100):base).toFixed(2)} €</td></tr>`;
+    }).join('');
+    return `<div style="page-break-after:always;">
+      <div class="header"><div class="logo">${d.empresa.logo?`<img src="${d.empresa.logo}" style="max-height:70px">`:''}</div><div class="doc-type"><h1>${esc(d.tipo_documento)}</h1><div class="num">${d.detalles.numero?`Nº ${esc(d.detalles.numero)}`:''}</div><div class="num">${fecha}</div></div></div>
+      <div class="info-grid"><div class="info-block"><h3>Emisor</h3><p><strong>${esc(d.empresa.nombre)}</strong></p><p>${esc(d.empresa.nif)}</p><p style="white-space:pre-line">${esc(d.empresa.direccion)}</p></div><div class="info-block"><h3>Receptor</h3><p><strong>${esc(d.cliente.nombre)}</strong></p>${d.cliente.dni?`<p>${esc(d.cliente.dni)}</p>`:''}<p style="white-space:pre-line">${esc(d.cliente.direccion)}</p></div></div>
+      <table><thead><tr><th>Descripción</th>${d.mostrar_cantidad?'<th style="text-align:center">Cant.</th>':''}<th style="text-align:right">P.Unit.</th><th style="text-align:right">Base</th>${d.aplicar_iva?`<th style="text-align:right">IVA ${ivaRate}%</th>`:''}<th style="text-align:right">Total</th></tr></thead><tbody>${conceptosHtml}</tbody></table>
+      ${d.mostrar_totales?`<div class="totals"><div class="row"><span>Base:</span><span>${totals.base.toFixed(2)} €</span></div>${totals.dto>0?`<div class="row discount"><span>Dto (${d.descuento_pct}%):</span><span>-${totals.dto.toFixed(2)} €</span></div>`:''} ${d.aplicar_iva?`<div class="row"><span>IVA (${ivaRate}%):</span><span>${totals.iva.toFixed(2)} €</span></div>`:''}<div class="row total-final"><span>TOTAL</span><span>${totals.total.toFixed(2)} €</span></div></div>`:''}
+    </div>`;
+  }).join('');
+
+  const firstColor = state.tabs[0]?.data?.empresa?.color_tema || '#1a4f8b';
+  const combinedHtml = `<!DOCTYPE html><html><head><meta charset="UTF-8"><style>
+    @page{size:A4;margin:18mm 15mm 20mm 15mm;}*{box-sizing:border-box;margin:0;padding:0;}body{font-family:'Helvetica Neue',Arial,sans-serif;font-size:9.5pt;color:#1a1a1a;line-height:1.5;}.header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;padding-bottom:14px;border-bottom:3px solid ${firstColor};}.header .doc-type{text-align:right;}.header .doc-type h1{font-size:18pt;color:${firstColor};font-weight:700;}.header .doc-type .num{font-size:10pt;color:#555;}.info-grid{display:flex;gap:30px;margin-bottom:20px;}.info-block{flex:1;}.info-block h3{font-size:8.5pt;text-transform:uppercase;color:${firstColor};letter-spacing:1px;margin-bottom:6px;border-bottom:1px solid #ddd;padding-bottom:3px;}.info-block p{font-size:9pt;color:#333;margin:2px 0;}table{width:100%;border-collapse:collapse;margin-bottom:20px;}thead th{background:${firstColor};color:white;padding:8px 10px;font-size:8.5pt;text-transform:uppercase;text-align:left;}tbody td{padding:8px 10px;border-bottom:1px solid #e5e5e5;font-size:9pt;}tbody tr:nth-child(even){background:#f8f9fa;}.totals{margin-left:auto;width:280px;}.totals .row{display:flex;justify-content:space-between;padding:5px 0;font-size:9.5pt;}.totals .row.discount{color:#e67e22;}.totals .total-final{border-top:2px solid ${firstColor};padding:8px 0;margin-top:4px;font-size:13pt;font-weight:700;color:${firstColor};}
+  </style></head><body>${pages}</body></html>`;
+
+  const iframe = document.createElement('iframe');
+  iframe.style.cssText = 'position:fixed;left:0;top:0;width:210mm;height:297mm;border:none;opacity:0;pointer-events:none;z-index:-1;';
+  document.body.appendChild(iframe);
+  const doc = iframe.contentDocument; doc.open(); doc.write(combinedHtml); doc.close();
+
+  setTimeout(() => {
+    html2pdf().set({
+      margin: [10,10,10,10], filename: `PACK_ERB_${new Date().toISOString().slice(0,10)}.pdf`,
+      image: { type: 'jpeg', quality: 0.98 },
+      html2canvas: { scale: 2, scrollY: 0 }, jsPDF: { unit: 'mm', format: 'a4' }
+    }).from(doc.body).save().then(() => {
+      document.body.removeChild(iframe);
+      toast('✓ PDF combinado descargado', 'success');
+    });
+  }, 600);
 }
 
 // ════════════════════════════════════════════════════════════════
