@@ -148,7 +148,7 @@ input[type="date"] { color-scheme: dark; }
 }
 .form-check input:checked { background: var(--accent); border-color: var(--accent); }
 .form-check input:checked::before { content: '✓'; color: white; font-size: 0.7rem; font-weight: 700; }
-.form-check label { font-size: 0.85rem; color: var(--text-secondary); cursor: pointer; }
+.form-check label, .form-check span { font-size: 0.85rem; color: var(--text-secondary); cursor: pointer; }
 
 /* ═══ CARDS ═══ */
 .card {
@@ -419,7 +419,12 @@ function saveState() {
       perfiles: state.perfiles, clientes: state.clientes,
       historial: state.historial, config: state.config
     }));
-  } catch(e) { console.warn('Error saving state:', e); }
+    return true;
+  } catch(e) {
+    console.warn('Error saving state:', e);
+    toast('⚠ No se pudo guardar: almacenamiento lleno. Exporta un backup y borra historial antiguo.', 'error');
+    return false;
+  }
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -428,9 +433,16 @@ function saveState() {
 let _tabIdCounter = 0;
 function genId() { return 'tab_' + (++_tabIdCounter) + '_' + Date.now(); }
 function esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
+function escJs(s) {
+  // 1. Escape for JS string literal (single-quoted)
+  let r = (s||'').replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/\n/g,'\\n');
+  // 2. Escape for HTML attribute context (double-quoted)
+  return r.replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
+}
+function safeFilename(s) { return (s||'').replace(/[^a-zA-Z0-9\u00C0-\u024F\u00F1\u00D1]/g,'_').substring(0,30); }
 function today() { return new Date().toISOString().slice(0, 10); }
-function todayDMY() { const d = new Date(); return `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`; }
 function formatMoney(n) { return (n || 0).toLocaleString('es-ES', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €'; }
+function safeDate(s) { if (!s) return ''; const d = new Date(s); return isNaN(d.getTime()) ? '' : d.toLocaleDateString('es-ES'); }
 
 // ════════════════════════════════════════════════════════════════
 //  TOAST & STATUS
@@ -479,7 +491,6 @@ function newTab(data = null) {
 }
 
 function switchTab(id) {
-  saveCurrentTabData();
   state.activeTab = id;
   renderTabs(); renderActiveTab();
 }
@@ -527,9 +538,9 @@ function renderActiveTab() {
         <button onclick="moveRow(${i},-1)" title="Subir">▲</button>
         <button onclick="moveRow(${i},1)" title="Bajar">▼</button>
       </div>
-      <input class="form-input" value="${esc(c.descripcion)}" placeholder="Descripción..." onchange="updateConcepto(${i},'descripcion',this.value)">
-      <input class="form-input" type="number" min="0" step="0.01" value="${c.cantidad}" style="text-align:center" onchange="updateConcepto(${i},'cantidad',this.value)">
-      <input class="form-input" type="number" min="0" step="0.01" value="${c.precio_base}" style="text-align:right" onchange="updateConcepto(${i},'precio_base',this.value)">
+      <input class="form-input" value="${esc(c.descripcion)}" placeholder="Descripción..." oninput="updateConcepto(${i},'descripcion',this.value)">
+      <input class="form-input" type="number" min="0" step="0.01" value="${c.cantidad}" style="text-align:center" oninput="updateConcepto(${i},'cantidad',this.value)">
+      <input class="form-input" type="number" min="0" step="0.01" value="${c.precio_base}" style="text-align:right" oninput="updateConcepto(${i},'precio_base',this.value)">
       <button class="delete-row-btn" onclick="deleteRow(${i})" title="Eliminar">✕</button>
     </div>`).join('');
 
@@ -571,7 +582,7 @@ function renderActiveTab() {
             <div class="form-group" style="flex:1"><label class="form-label">NIF</label><input class="form-input" value="${esc(d.empresa.nif)}" onchange="updateField('empresa.nif',this.value)"></div>
             <div class="form-group" style="flex:1"><label class="form-label">Teléfono</label><input class="form-input" value="${esc(d.empresa.telefono)}" onchange="updateField('empresa.telefono',this.value)"></div>
           </div>
-          <div class="form-group mb-md"><label class="form-label">Dirección</label><textarea class="form-textarea" rows="2" onchange="updateField('empresa.direccion',this.value)">${esc(d.empresa.direccion)}</textarea></div>
+          <div class="form-group mb-md"><label class="form-label">Dirección</label><textarea class="form-textarea" rows="2" oninput="updateField('empresa.direccion',this.value)">${esc(d.empresa.direccion)}</textarea></div>
           <div class="flex-row gap-sm mb-md">
             <div class="form-group" style="flex:1"><label class="form-label">Email</label><input class="form-input" type="email" value="${esc(d.empresa.email)}" onchange="updateField('empresa.email',this.value)"></div>
             <div class="form-group" style="flex:1"><label class="form-label">IBAN</label><input class="form-input" value="${esc(d.empresa.iban)}" onchange="updateField('empresa.iban',this.value)"></div>
@@ -596,7 +607,7 @@ function renderActiveTab() {
               <div class="form-group" style="flex:1"><label class="form-label">DNI/NIF</label><input class="form-input" id="client-dni" value="${esc(d.cliente.dni)}" onchange="updateField('cliente.dni',this.value)"></div>
               <div class="form-group" style="flex:1"><label class="form-label">Teléfono</label><input class="form-input" id="client-tel" value="${esc(d.cliente.telefono)}" placeholder="34600123456" onchange="updateField('cliente.telefono',this.value)"></div>
             </div>
-            <div class="form-group"><label class="form-label">Dirección</label><textarea class="form-textarea" id="client-dir" rows="2" onchange="updateField('cliente.direccion',this.value)">${esc(d.cliente.direccion)}</textarea></div>
+            <div class="form-group"><label class="form-label">Dirección</label><textarea class="form-textarea" id="client-dir" rows="2" oninput="updateField('cliente.direccion',this.value)">${esc(d.cliente.direccion)}</textarea></div>
           </div>
           <div class="card slide-up" style="animation-delay:0.15s">
             <div class="card-title">Metadatos</div>
@@ -615,8 +626,8 @@ function renderActiveTab() {
           <div class="form-group" style="flex:1"><label class="form-label">Equipo</label><input class="form-input" value="${esc(d.tecnico.equipo)}" onchange="updateField('tecnico.equipo',this.value)"></div>
           <div class="form-group" style="flex:1"><label class="form-label">Marca</label><input class="form-input" value="${esc(d.tecnico.marca)}" onchange="updateField('tecnico.marca',this.value)"></div>
         </div>
-        <div class="form-group mb-md"><label class="form-label">Avería</label><textarea class="form-textarea" rows="2" onchange="updateField('tecnico.averia',this.value)">${esc(d.tecnico.averia)}</textarea></div>
-        <div class="form-group"><label class="form-label">Diagnóstico</label><textarea class="form-textarea" rows="2" onchange="updateField('tecnico.diagnostico',this.value)">${esc(d.tecnico.diagnostico)}</textarea></div>
+        <div class="form-group mb-md"><label class="form-label">Avería</label><textarea class="form-textarea" rows="2" oninput="updateField('tecnico.averia',this.value)">${esc(d.tecnico.averia)}</textarea></div>
+        <div class="form-group"><label class="form-label">Diagnóstico</label><textarea class="form-textarea" rows="2" oninput="updateField('tecnico.diagnostico',this.value)">${esc(d.tecnico.diagnostico)}</textarea></div>
       </div>
 
       <!-- Conceptos -->
@@ -636,7 +647,7 @@ function renderActiveTab() {
       <div class="totals-panel mb-md slide-up" style="animation-delay:0.25s">
         <div class="totals-options">
           <div class="flex-row gap-sm">
-            <label class="form-check"><input type="checkbox" ${d.aplicar_iva?'checked':''} onchange="updateField('aplicar_iva',this.checked);renderActiveTab()"><label>Aplicar IVA</label></label>
+            <label class="form-check"><input type="checkbox" ${d.aplicar_iva?'checked':''} onchange="updateField('aplicar_iva',this.checked);renderActiveTab()"><span>Aplicar IVA</span></label>
             <select class="form-select" style="width:80px" onchange="updateField('iva_porcentaje',parseInt(this.value));recalcTotals()">
               <option value="21" ${d.iva_porcentaje==21?'selected':''}>21%</option>
               <option value="10" ${d.iva_porcentaje==10?'selected':''}>10%</option>
@@ -649,9 +660,9 @@ function renderActiveTab() {
             <span style="color:var(--text-muted);font-size:0.85rem">%</span>
           </div>
           <div class="flex-row gap-sm" style="flex-wrap:wrap">
-            <label class="form-check"><input type="checkbox" ${d.mostrar_cantidad?'checked':''} onchange="updateField('mostrar_cantidad',this.checked)"><label>Cantidad</label></label>
-            <label class="form-check"><input type="checkbox" ${d.mostrar_notas?'checked':''} onchange="updateField('mostrar_notas',this.checked)"><label>Notas</label></label>
-            <label class="form-check"><input type="checkbox" ${d.mostrar_totales?'checked':''} onchange="updateField('mostrar_totales',this.checked)"><label>Totales</label></label>
+            <label class="form-check"><input type="checkbox" ${d.mostrar_cantidad?'checked':''} onchange="updateField('mostrar_cantidad',this.checked)"><span>Cantidad</span></label>
+            <label class="form-check"><input type="checkbox" ${d.mostrar_notas?'checked':''} onchange="updateField('mostrar_notas',this.checked)"><span>Notas</span></label>
+            <label class="form-check"><input type="checkbox" ${d.mostrar_totales?'checked':''} onchange="updateField('mostrar_totales',this.checked)"><span>Totales</span></label>
           </div>
         </div>
         <div class="totals-display" id="totals-display">
@@ -667,7 +678,7 @@ function renderActiveTab() {
       <div class="flex-row mb-md" style="align-items:flex-start;gap:16px;flex-wrap:wrap">
         <div class="form-group" style="flex:1;min-width:250px">
           <label class="form-label">Notas al pie</label>
-          <textarea class="form-textarea" rows="3" placeholder="Notas adicionales..." onchange="updateField('notas',this.value)">${esc(d.notas)}</textarea>
+          <textarea class="form-textarea" rows="3" placeholder="Notas adicionales..." oninput="updateField('notas',this.value)">${esc(d.notas)}</textarea>
         </div>
         <div style="display:flex;flex-direction:column;gap:8px;align-self:flex-end">
           <button class="btn btn-wa btn-sm" onclick="sendWhatsApp()">📱 WhatsApp</button>
@@ -692,10 +703,6 @@ function updateField(path, value) {
   obj[parts[parts.length - 1]] = value;
   tab.dirty = true;
   renderTabs();
-}
-
-function saveCurrentTabData() {
-  // Fields are saved via onchange — this is a placeholder for future use
 }
 
 function updateConcepto(idx, field, value) {
@@ -771,7 +778,7 @@ function onClientInput(input) {
   const matches = Object.entries(state.clientes).filter(([name]) => name.toLowerCase().includes(q)).slice(0, 8);
   if (!matches.length) { list.classList.remove('show'); return; }
   list.innerHTML = matches.map(([name, c]) =>
-    `<div class="autocomplete-item" onclick="selectClient('${esc(name)}')">
+    `<div class="autocomplete-item" onclick="selectClient('${escJs(name)}')">
       <div>${esc(name)}</div>
       <div class="sub">${esc(c.dni || '')} ${esc(c.telefono || '')}</div>
     </div>`).join('');
@@ -812,11 +819,13 @@ function savePerfilFromTab() {
   state.perfiles[key] = { ...tab.data.empresa };
   tab.data.perfil_key = key;
   saveState(); toast('✓ Perfil guardado: ' + key, 'success');
+  renderActiveTab();
 }
 
 function pickLogoFile() { document.getElementById('logo-file-input').click(); }
 function handleLogoFile(input) {
   const file = input.files[0]; if (!file) return;
+  if (file.size > 500 * 1024) { toast('⚠ Logo demasiado grande (máx 500KB). Usa una imagen más pequeña.', 'error'); return; }
   const reader = new FileReader();
   reader.onload = (e) => { updateField('empresa.logo', e.target.result); renderActiveTab(); };
   reader.readAsDataURL(file);
@@ -829,6 +838,7 @@ function clearTab() {
   if (!confirm('¿Limpiar todos los datos de esta pestaña?')) return;
   const tab = getActiveTab(); if (!tab) return;
   const perfil = state.perfiles[tab.data.perfil_key] || {};
+  tab.data.empresa = { ...perfil };
   tab.data.cliente = { nombre: '', dni: '', direccion: '', telefono: '' };
   tab.data.detalles = { numero: '', fecha: today() };
   tab.data.conceptos = [{ descripcion: '', cantidad: 1, precio_base: 0 }];
@@ -862,7 +872,7 @@ function buildPDFHtml(d) {
   const totals = calcTotals(d);
   const ivaRate = d.aplicar_iva ? (d.iva_porcentaje || 21) : 0;
   const color = d.empresa.color_tema || '#1a4f8b';
-  const fecha = d.detalles.fecha ? new Date(d.detalles.fecha).toLocaleDateString('es-ES') : '';
+  const fecha = safeDate(d.detalles.fecha);
   const isTecnico = d.tipo_documento === 'INFORME TÉCNICO';
 
   const conceptosHtml = (d.conceptos || []).filter(c => c.descripcion).map(c => {
@@ -970,11 +980,15 @@ function generatePDF() {
     state.clientes[d.cliente.nombre] = { dni: d.cliente.dni, direccion: d.cliente.direccion, telefono: d.cliente.telefono };
   }
   const totals = calcTotals(d);
-  // Save to history
+  // BUG 4 FIX: Clone data WITHOUT logo to save localStorage space
+  const histData = JSON.parse(JSON.stringify(d));
+  if (histData.empresa) histData.empresa.logo = '';
+  // BUG 10 FIX: autoincrement ID
+  const maxId = state.historial.reduce((m, h) => Math.max(m, h.id || 0), 0);
   state.historial.push({
-    id: Date.now(), tipo: d.tipo_documento, numero: d.detalles.numero,
+    id: maxId + 1, tipo: d.tipo_documento, numero: d.detalles.numero,
     fecha: d.detalles.fecha, cliente: d.cliente.nombre, total: totals.total,
-    data: JSON.parse(JSON.stringify(d)), creado: new Date().toISOString()
+    data: histData, creado: new Date().toISOString()
   });
   saveState();
   tab.dirty = false; renderTabs();
@@ -983,7 +997,7 @@ function generatePDF() {
 
 function _doPDFGeneration(d) {
   const html = buildPDFHtml(d);
-  const nombre = `${(d.tipo_documento||'DOC').replace(/\s+/g,'_')}_${(d.cliente.nombre||'Sin_Cliente').replace(/[^a-zA-Z0-9]/g,'_').substring(0,25)}_${(d.detalles.numero||'SN').replace(/[^a-zA-Z0-9]/g,'_')}`;
+  const nombre = `${safeFilename(d.tipo_documento||'DOC')}_${safeFilename(d.cliente.nombre||'Sin_Cliente')}_${safeFilename(d.detalles.numero||'SN')}`;
 
   // Crear iframe oculto — el HTML completo (con <style> en <head>) se renderiza bien aquí
   const iframe = document.createElement('iframe');
@@ -998,7 +1012,7 @@ function _doPDFGeneration(d) {
     const opt = {
       margin: [10, 10, 10, 10], filename: nombre + '.pdf',
       image: { type: 'jpeg', quality: 0.98 },
-      html2canvas: { scale: 2, useCORS: true, letterRendering: true, scrollY: 0, windowWidth: doc.body.scrollWidth },
+      html2canvas: { scale: 2, useCORS: true, letterRendering: true, scrollY: 0, windowWidth: doc.body.scrollWidth || 794 },
       jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
       pagebreak: { mode: ['avoid-all', 'css', 'legacy'] }
     };
@@ -1018,6 +1032,7 @@ function previewPDF() {
   const tab = getActiveTab(); if (!tab) return;
   const html = buildPDFHtml(tab.data);
   const win = window.open('', '_blank');
+  if (!win) { toast('⚠ Popup bloqueado — permite popups para ver la vista previa', 'error'); return; }
   win.document.write(html); win.document.close();
   setStatus('👁 Vista previa abierta');
 }
@@ -1026,29 +1041,29 @@ function generateCombinedPDF() {
   if (state.tabs.length < 2) { toast('Necesitas al menos 2 pestañas para combinar', 'info'); return; }
   toast('⏳ Generando PDF combinado...', 'info');
 
-  // Construir HTML combinado con page breaks
   const pages = state.tabs.map(t => {
     const d = t.data;
     const totals = calcTotals(d);
-    const color = d.empresa.color_tema || '#1a4f8b';
+    const c = d.empresa.color_tema || '#1a4f8b';
     const ivaRate = d.aplicar_iva ? (d.iva_porcentaje || 21) : 0;
-    const fecha = d.detalles.fecha ? new Date(d.detalles.fecha).toLocaleDateString('es-ES') : '';
-    const isTecnico = d.tipo_documento === 'INFORME TÉCNICO';
-    const conceptosHtml = (d.conceptos || []).filter(c => c.descripcion).map(c => {
-      const base = (c.cantidad||0) * (c.precio_base||0);
-      return `<tr><td>${esc(c.descripcion)}</td>${d.mostrar_cantidad ? `<td style="text-align:center">${parseFloat(c.cantidad).toFixed(2)}</td>` : ''}<td style="text-align:right">${parseFloat(c.precio_base).toFixed(2)} €</td><td style="text-align:right">${base.toFixed(2)} €</td>${d.aplicar_iva ? `<td style="text-align:right">${(base*ivaRate/100).toFixed(2)} €</td>` : ''}<td style="text-align:right;font-weight:600">${(d.aplicar_iva?base*(1+ivaRate/100):base).toFixed(2)} €</td></tr>`;
+    const fecha = safeDate(d.detalles.fecha);
+    const conceptosHtml = (d.conceptos || []).filter(r => r.descripcion).map(r => {
+      const base = (r.cantidad||0) * (r.precio_base||0);
+      return `<tr><td>${esc(r.descripcion)}</td>${d.mostrar_cantidad?`<td style="text-align:center">${parseFloat(r.cantidad).toFixed(2)}</td>`:''}<td style="text-align:right">${parseFloat(r.precio_base).toFixed(2)} €</td><td style="text-align:right">${base.toFixed(2)} €</td>${d.aplicar_iva?`<td style="text-align:right">${(base*ivaRate/100).toFixed(2)} €</td>`:''}<td style="text-align:right;font-weight:600">${(d.aplicar_iva?base*(1+ivaRate/100):base).toFixed(2)} €</td></tr>`;
     }).join('');
     return `<div style="page-break-after:always;">
-      <div class="header"><div class="logo">${d.empresa.logo?`<img src="${d.empresa.logo}" style="max-height:70px">`:''}</div><div class="doc-type"><h1>${esc(d.tipo_documento)}</h1><div class="num">${d.detalles.numero?`Nº ${esc(d.detalles.numero)}`:''}</div><div class="num">${fecha}</div></div></div>
-      <div class="info-grid"><div class="info-block"><h3>Emisor</h3><p><strong>${esc(d.empresa.nombre)}</strong></p><p>${esc(d.empresa.nif)}</p><p style="white-space:pre-line">${esc(d.empresa.direccion)}</p></div><div class="info-block"><h3>Receptor</h3><p><strong>${esc(d.cliente.nombre)}</strong></p>${d.cliente.dni?`<p>${esc(d.cliente.dni)}</p>`:''}<p style="white-space:pre-line">${esc(d.cliente.direccion)}</p></div></div>
-      <table><thead><tr><th>Descripción</th>${d.mostrar_cantidad?'<th style="text-align:center">Cant.</th>':''}<th style="text-align:right">P.Unit.</th><th style="text-align:right">Base</th>${d.aplicar_iva?`<th style="text-align:right">IVA ${ivaRate}%</th>`:''}<th style="text-align:right">Total</th></tr></thead><tbody>${conceptosHtml}</tbody></table>
-      ${d.mostrar_totales?`<div class="totals"><div class="row"><span>Base:</span><span>${totals.base.toFixed(2)} €</span></div>${totals.dto>0?`<div class="row discount"><span>Dto (${d.descuento_pct}%):</span><span>-${totals.dto.toFixed(2)} €</span></div>`:''} ${d.aplicar_iva?`<div class="row"><span>IVA (${ivaRate}%):</span><span>${totals.iva.toFixed(2)} €</span></div>`:''}<div class="row total-final"><span>TOTAL</span><span>${totals.total.toFixed(2)} €</span></div></div>`:''}
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;padding-bottom:14px;border-bottom:3px solid ${c}">
+        <div>${d.empresa.logo?`<img src="${d.empresa.logo}" style="max-height:70px">`:''}</div>
+        <div style="text-align:right"><h1 style="font-size:18pt;color:${c};font-weight:700;margin:0">${esc(d.tipo_documento)}</h1><div style="font-size:10pt;color:#555">${d.detalles.numero?`Nº ${esc(d.detalles.numero)}`:''}</div><div style="font-size:10pt;color:#555">${fecha}</div></div>
+      </div>
+      <div class="info-grid"><div class="info-block"><h3 style="color:${c};border-bottom:1px solid #ddd">Emisor</h3><p><strong>${esc(d.empresa.nombre)}</strong></p><p>${esc(d.empresa.nif)}</p><p style="white-space:pre-line">${esc(d.empresa.direccion)}</p></div><div class="info-block"><h3 style="color:${c};border-bottom:1px solid #ddd">Receptor</h3><p><strong>${esc(d.cliente.nombre)}</strong></p>${d.cliente.dni?`<p>${esc(d.cliente.dni)}</p>`:''}<p style="white-space:pre-line">${esc(d.cliente.direccion)}</p></div></div>
+      <table><thead><tr><th style="background:${c};color:white">Descripción</th>${d.mostrar_cantidad?`<th style="background:${c};color:white;text-align:center">Cant.</th>`:''}<th style="background:${c};color:white;text-align:right">P.Unit.</th><th style="background:${c};color:white;text-align:right">Base</th>${d.aplicar_iva?`<th style="background:${c};color:white;text-align:right">IVA ${ivaRate}%</th>`:''}<th style="background:${c};color:white;text-align:right">Total</th></tr></thead><tbody>${conceptosHtml}</tbody></table>
+      ${d.mostrar_totales?`<div class="totals"><div class="row"><span>Base:</span><span>${totals.base.toFixed(2)} €</span></div>${totals.dto>0?`<div class="row discount"><span>Dto (${d.descuento_pct}%):</span><span>-${totals.dto.toFixed(2)} €</span></div><div class="row"><span>Base Neta:</span><span>${totals.baseNeta.toFixed(2)} €</span></div>`:''} ${d.aplicar_iva?`<div class="row"><span>IVA (${ivaRate}%):</span><span>${totals.iva.toFixed(2)} €</span></div>`:''}<div class="row" style="border-top:2px solid ${c};padding:8px 0;margin-top:4px;font-size:13pt;font-weight:700;color:${c}"><span>TOTAL</span><span>${totals.total.toFixed(2)} €</span></div></div>`:''}
     </div>`;
   }).join('');
 
-  const firstColor = state.tabs[0]?.data?.empresa?.color_tema || '#1a4f8b';
   const combinedHtml = `<!DOCTYPE html><html><head><meta charset="UTF-8"><style>
-    @page{size:A4;margin:18mm 15mm 20mm 15mm;}*{box-sizing:border-box;margin:0;padding:0;}body{font-family:'Helvetica Neue',Arial,sans-serif;font-size:9.5pt;color:#1a1a1a;line-height:1.5;}.header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;padding-bottom:14px;border-bottom:3px solid ${firstColor};}.header .doc-type{text-align:right;}.header .doc-type h1{font-size:18pt;color:${firstColor};font-weight:700;}.header .doc-type .num{font-size:10pt;color:#555;}.info-grid{display:flex;gap:30px;margin-bottom:20px;}.info-block{flex:1;}.info-block h3{font-size:8.5pt;text-transform:uppercase;color:${firstColor};letter-spacing:1px;margin-bottom:6px;border-bottom:1px solid #ddd;padding-bottom:3px;}.info-block p{font-size:9pt;color:#333;margin:2px 0;}table{width:100%;border-collapse:collapse;margin-bottom:20px;}thead th{background:${firstColor};color:white;padding:8px 10px;font-size:8.5pt;text-transform:uppercase;text-align:left;}tbody td{padding:8px 10px;border-bottom:1px solid #e5e5e5;font-size:9pt;}tbody tr:nth-child(even){background:#f8f9fa;}.totals{margin-left:auto;width:280px;}.totals .row{display:flex;justify-content:space-between;padding:5px 0;font-size:9.5pt;}.totals .row.discount{color:#e67e22;}.totals .total-final{border-top:2px solid ${firstColor};padding:8px 0;margin-top:4px;font-size:13pt;font-weight:700;color:${firstColor};}
+    @page{size:A4;margin:18mm 15mm 20mm 15mm;}*{box-sizing:border-box;margin:0;padding:0;}body{font-family:'Helvetica Neue',Arial,sans-serif;font-size:9.5pt;color:#1a1a1a;line-height:1.5;background:#ffffff;}.info-grid{display:flex;gap:30px;margin-bottom:20px;}.info-block{flex:1;}.info-block h3{font-size:8.5pt;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;padding-bottom:3px;}.info-block p{font-size:9pt;color:#333;margin:2px 0;}table{width:100%;border-collapse:collapse;margin-bottom:20px;}thead th{padding:8px 10px;font-size:8.5pt;text-transform:uppercase;letter-spacing:0.5px;text-align:left;}tbody td{padding:8px 10px;border-bottom:1px solid #e5e5e5;font-size:9pt;}tbody tr:nth-child(even){background:#f8f9fa;}.totals{margin-left:auto;width:280px;}.totals .row{display:flex;justify-content:space-between;padding:5px 0;font-size:9.5pt;}.totals .row.discount{color:#e67e22;}
   </style></head><body>${pages}</body></html>`;
 
   const iframe = document.createElement('iframe');
@@ -1064,6 +1079,9 @@ function generateCombinedPDF() {
     }).from(doc.body).save().then(() => {
       document.body.removeChild(iframe);
       toast('✓ PDF combinado descargado', 'success');
+    }).catch(err => {
+      document.body.removeChild(iframe);
+      toast('✗ Error PDF combinado: ' + err.message, 'error');
     });
   }, 600);
 }
@@ -1098,7 +1116,7 @@ function filterHistory() {
     <div class="history-item" onclick="this.classList.toggle('selected')">
       <div class="info">
         <div class="title">${esc(h.tipo)} — ${esc(h.cliente||'Sin cliente')}</div>
-        <div class="meta">Nº ${esc(h.numero||'—')} | ${h.fecha ? new Date(h.fecha).toLocaleDateString('es-ES') : '—'} | ${formatMoney(h.total)}</div>
+        <div class="meta">Nº ${esc(h.numero||'—')} | ${safeDate(h.fecha) || '—'} | ${formatMoney(h.total)}</div>
       </div>
       <div class="actions">
         <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();viewPDFFromHistory(${h.id})" title="Ver PDF">👁</button>
@@ -1119,6 +1137,7 @@ function viewPDFFromHistory(id) {
   const h = state.historial.find(x => x.id === id); if (!h) return;
   const html = buildPDFHtml(h.data);
   const win = window.open('', '_blank');
+  if (!win) { toast('⚠ Popup bloqueado — permite popups para ver la vista previa', 'error'); return; }
   win.document.write(html); win.document.close();
   setStatus('👁 Vista previa desde historial');
 }
@@ -1142,6 +1161,14 @@ function handleImportJSON(input) {
   reader.onload = (e) => {
     try {
       const d = JSON.parse(e.target.result);
+      // Validate minimum required structure
+      if (!d || typeof d !== 'object') throw new Error('No es un objeto válido');
+      if (!d.tipo_documento) d.tipo_documento = 'PRESUPUESTO';
+      if (!d.empresa) d.empresa = { nombre: '', nif: '', direccion: '', telefono: '', email: '', iban: '', logo: '', color_tema: '#1a4f8b' };
+      if (!d.cliente) d.cliente = { nombre: '', dni: '', direccion: '', telefono: '' };
+      if (!d.detalles) d.detalles = { numero: '', fecha: today() };
+      if (!d.tecnico) d.tecnico = { equipo: '', marca: '', averia: '', diagnostico: '' };
+      if (!Array.isArray(d.conceptos)) d.conceptos = [{ descripcion: '', cantidad: 1, precio_base: 0 }];
       newTab(d); closeModal(); toast('✓ JSON importado', 'success');
     } catch(err) { toast('✗ JSON inválido: ' + err.message, 'error'); }
   };
@@ -1152,6 +1179,7 @@ function exportAllJSON() {
   const blob = new Blob([JSON.stringify(state.historial, null, 2)], { type: 'application/json' });
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
   a.download = `ERB_backup_${new Date().toISOString().slice(0,10)}.json`; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   toast('✓ Backup exportado', 'success');
 }
 
@@ -1173,7 +1201,7 @@ function showSettings() {
     ${Object.entries(state.perfiles).map(([k, p]) => `
       <div class="history-item" style="margin-bottom:6px">
         <div class="info"><div class="title">${esc(k)}</div><div class="meta">${esc(p.nombre)} — ${esc(p.nif)}</div></div>
-        <button class="btn btn-sm" style="color:var(--red)" onclick="if(confirm('¿Eliminar perfil ${esc(k)}?')){delete state.perfiles['${esc(k)}'];saveState();showSettings()}">🗑</button>
+        <button class="btn btn-sm" style="color:var(--red)" onclick="if(confirm('¿Eliminar perfil?')){delete state.perfiles['${escJs(k)}'];saveState();showSettings()}">🗑</button>
       </div>`).join('')}
     <hr class="separator">
     <h3 style="font-size:0.9rem;color:var(--accent);margin:16px 0 8px">Base de Clientes (${Object.keys(state.clientes).length})</h3>
@@ -1192,6 +1220,17 @@ function showSettings() {
 // ════════════════════════════════════════════════════════════════
 function openModal() { document.getElementById('modal-overlay').classList.add('active'); }
 function closeModal() { document.getElementById('modal-overlay').classList.remove('active'); }
+
+// ════════════════════════════════════════════════════════════════
+//  KEYBOARD SHORTCUTS (BUG M)
+// ════════════════════════════════════════════════════════════════
+document.addEventListener('keydown', (e) => {
+  const ctrl = e.ctrlKey || e.metaKey;
+  if (!ctrl) return;
+  if (e.key === 'n' || e.key === 'N') { e.preventDefault(); newTab(); }
+  else if (e.key === 'p' || e.key === 'P') { e.preventDefault(); generatePDF(); }
+  else if (e.key === 'z' || e.key === 'Z') { e.preventDefault(); undoDelete(); }
+});
 
 // ════════════════════════════════════════════════════════════════
 //  INIT
